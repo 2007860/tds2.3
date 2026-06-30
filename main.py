@@ -1,60 +1,103 @@
+import os
+import yaml
+from dotenv import dotenv_values
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
-from dotenv import load_dotenv
-import yaml, os
 
-load_dotenv()
+app = FastAPI()
 
-app=FastAPI()
-app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_methods=["*"],allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-defaults={
-    "port":8000,
-    "workers":1,
-    "debug":False,
-    "log_level":"info",
-    "api_key":"default-secret-000"
+DEFAULTS = {
+    "port": 8000,
+    "workers": 1,
+    "debug": False,
+    "log_level": "info",
+    "api_key": "default-secret-000",
 }
 
+
 def to_bool(v):
-    return str(v).strip().lower() in ("true","1","yes","on")
+    return str(v).strip().lower() in (
+        "true",
+        "1",
+        "yes",
+        "on",
+    )
 
-def coerce(k,v):
-    if k in ("port","workers"):
-        return int(v)
-    if k=="debug":
-        return to_bool(v)
-    return str(v)
 
-@app.get("/")
-def root():
-    return {"status":"ok"}
+def coerce(key, value):
+    if key in ("port", "workers"):
+        return int(value)
+    if key == "debug":
+        return to_bool(value)
+    return str(value)
+
 
 @app.get("/effective-config")
-def effective_config(set:list[str]=Query(default=[])):
-    cfg=defaults.copy()
+def effective_config(set: list[str] = Query(default=[])):
+    config = DEFAULTS.copy()
 
-    env=os.getenv("APP_ENV","development")
-    fn=f"config.{env}.yaml"
-    if os.path.exists(fn):
-        with open(fn) as f:
-            y=yaml.safe_load(f) or {}
-        for k,v in y.items():
-            cfg[k]=coerce(k,v)
+    # -----------------------------
+    # YAML layer
+    # -----------------------------
+    env = os.getenv("APP_ENV", "development")
+    yaml_file = f"config.{env}.yaml"
 
-    # .env loaded into environment
-    for ek,cv in [("APP_PORT","port"),("APP_DEBUG","debug"),("APP_LOG_LEVEL","log_level"),("APP_API_KEY","api_key"),("NUM_WORKERS","workers")]:
-        if ek in os.environ:
-            cfg[cv]=coerce(cv,os.environ[ek])
+    if os.path.exists(yaml_file):
+        with open(yaml_file, "r") as f:
+            data = yaml.safe_load(f) or {}
 
-    for ek,cv in [("APP_PORT","port"),("APP_WORKERS","workers"),("APP_DEBUG","debug"),("APP_LOG_LEVEL","log_level"),("APP_API_KEY","api_key")]:
-        if ek in os.environ:
-            cfg[cv]=coerce(cv,os.environ[ek])
+        for k, v in data.items():
+            config[k] = coerce(k, v)
 
+    # -----------------------------
+    # .env layer
+    # -----------------------------
+    env_file = dotenv_values(".env")
+
+    mapping = {
+        "APP_PORT": "port",
+        "APP_DEBUG": "debug",
+        "APP_LOG_LEVEL": "log_level",
+        "APP_API_KEY": "api_key",
+        "NUM_WORKERS": "workers",
+    }
+
+    for env_key, cfg_key in mapping.items():
+        if env_key in env_file:
+            config[cfg_key] = coerce(cfg_key, env_file[env_key])
+
+    # -----------------------------
+    # OS environment layer
+    # -----------------------------
+    mapping = {
+        "APP_PORT": "port",
+        "APP_WORKERS": "workers",
+        "APP_DEBUG": "debug",
+        "APP_LOG_LEVEL": "log_level",
+        "APP_API_KEY": "api_key",
+    }
+
+    for env_key, cfg_key in mapping.items():
+        if env_key in os.environ:
+            config[cfg_key] = coerce(cfg_key, os.environ[env_key])
+
+    # -----------------------------
+    # CLI overrides (?set=...)
+    # -----------------------------
     for item in set:
-        if "=" in item:
-            k,v=item.split("=",1)
-            cfg[k]=coerce(k,v)
+        if "=" not in item:
+            continue
 
-    cfg["api_key"]="****"
-    return cfg
+        k, v = item.split("=", 1)
+        config[k] = coerce(k, v)
+
+    config["api_key"] = "****"
+
+    return config

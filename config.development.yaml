@@ -1,7 +1,3 @@
-{
-  "port": 8064,
-  "workers": 5,
-  "debug": true,
-  "log_level": "error",
-  "api_key": "****"
-}
+port: 8064
+debug: false
+log_level: error
